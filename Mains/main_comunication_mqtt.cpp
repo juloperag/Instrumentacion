@@ -70,10 +70,10 @@ void setup() {
   mqttwifi.mqttClient.setCallback(mqtt_callback_bridge);
   //---------------Configuracion sensores--------------------
   //--------VL53L0X---------
-  //lds_1.initSensor(XSHUT1_PIN, 60000);
-  //lds_2.initSensor(XSHUT2_PIN, 60000);
-  //lds_1.sensor_VL53L0X.startContinuous(); //Se inicializa la Medicion del sensor de forma continua, luego por medio de un metodo se optiene la distancia
-  //lds_2.sensor_VL53L0X.startContinuous();
+  lds_1.initSensor(XSHUT1_PIN, 60000);
+  lds_2.initSensor(XSHUT2_PIN, 60000);
+  lds_1.sensor_VL53L0X.startContinuous(); //Se inicializa la Medicion del sensor de forma continua, luego por medio de un metodo se optiene la distancia
+  lds_2.sensor_VL53L0X.startContinuous();
   //-------IMU-----------
   imu.mode_operation = NDOF; //Establecemiento del modo
   loadFromEEPROM(&imu); //Cargamos los datos de calibracion de la memoria EEPROM
