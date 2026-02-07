@@ -4,7 +4,6 @@
 #include <BH1750.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
-#include "mqtt.h"
 #include "imu.h"
 #include "lds.h"
 #include <EEPROM.h>
@@ -19,12 +18,6 @@
 #define TEM_SENSOR_2_PIN 4
 
 //Definicion de instancias 
-//--------Comandos para MQTT y ping
-//wsl hostname -I
-//netsh interface portproxy add v4tov4 listenport=1883 listenaddress=0.0.0.0 connectport=1883 connectaddress=<IP_WSL>
-//---------------------
-//Mqtt_Wifi mqttwifi("Comunidad_UNMED", "wifi_med_213", "172.21.32.1", 1883); 
-Mqtt_Wifi mqttwifi("CLARO-6B07", "Cl4r0@FE6B07", "192.168.1.5", 1883);
 deviceBNO055 imu(BNO055_ADDR_B);
 LD_sensor lds_1(0x33);
 LD_sensor lds_2(0x34);
@@ -32,6 +25,9 @@ Adafruit_BME280 bme;
 BH1750 lightMeter(0x23);
 //Definicion de variables 
 unsigned int mode_operation = 0;
+uint16_t index_command = 0;
+String bufferReception;
+bool flag_command = false;
 //Variables del led
 uint16_t time_led = 0;
 uint8_t status = 0;
@@ -40,6 +36,8 @@ uint8_t status = 0;
 void mqtt_callback_bridge(char* topic, byte* payload, unsigned int length);
 void receptionSerial(void);
 void runCommand(String prtcommand);
+void saveToEEPROM(deviceBNO055* imuPtr);
+void loadFromEEPROM(deviceBNO055* imuPtr);
 
 void setup() {
   //Configuracion de pines
@@ -61,45 +59,64 @@ void setup() {
   Wire.begin(SDA_PIN, SCL_PIN);
   delay(1000);  // Dale tiempo al sensor
   Serial.write("Successful configuration I2C \n");
-  //--------------Configuracion Comunicacion WIFI-----------------
-  //Inicializacion conexion wifi
-  Serial.write("Init  connetion WIFI \n");
-  mqttwifi.connectWifi();
-  //Inicializar conexion con MQTT
-  mqttwifi.mqttClient.setServer(mqttwifi.mqtt_server,mqttwifi.port);
-  mqttwifi.mqttClient.setCallback(mqtt_callback_bridge);
   //---------------Configuracion sensores--------------------
   //--------VL53L0X---------
-  lds_1.initSensor(XSHUT1_PIN, 60000);
-  lds_2.initSensor(XSHUT2_PIN, 60000);
-  lds_1.sensor_VL53L0X.startContinuous(); //Se inicializa la Medicion del sensor de forma continua, luego por medio de un metodo se optiene la distancia
-  lds_2.sensor_VL53L0X.startContinuous();
+  //lds_1.initSensor(XSHUT1_PIN, 60000);
+  //lds_2.initSensor(XSHUT2_PIN, 60000);
+  //lds_1.sensor_VL53L0X.startContinuous(); //Se inicializa la Medicion del sensor de forma continua, luego por medio de un metodo se optiene la distancia
+  //lds_2.sensor_VL53L0X.startContinuous();
   //-------IMU-----------
   imu.mode_operation = NDOF; //Establecemiento del modo
   loadFromEEPROM(&imu); //Cargamos los datos de calibracion de la memoria EEPROM
   imu.set_configuration_IMU();  
   //------BMP------------
-  if (!bme.begin(0x76)) { Serial.println("Could not find a valid BME280");}
-  else{ Serial.println("BME280 find successfully");}
+  //if (!bme.begin(0x76)) { Serial.println("Could not find a valid BME280");}
+  //else{ Serial.println("BME280 find successfully");}
   //------BH1750---------
-  if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE)){ Serial.println("BH1750 Advanced begin");} 
-  else {Serial.println(F("Error initialising BH1750"));}
+  //if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE)){ Serial.println("BH1750 Advanced begin");} 
+  //else {Serial.println(F("Error initialising BH1750"));}
 }
 
 void loop(){
-
-  //Verificacion de conexion de cliente MQTT, realizar reconexion si es necesario
-  if(!mqttwifi.mqttClient.connected()){mqttwifi.reconnectMQTT();}
-  //Entrada en un loop hasta que se lance el callback
-  mqttwifi.mqttClient.loop();
-  //Procesamiento del comando recibido
-  if(mqttwifi.flag_command){ runCommand(mqttwifi.command); mqttwifi.flag_command = false;}
+  //Verificamos recepcion serial 
+  receptionSerial();
+  //Procesamiento del comando
+  if(flag_command)
+  {
+    //Seleccion opcion de acuerdo al comando
+    runCommand(bufferReception);
+    //Bajamos la bandera
+    flag_command = false;
+  }
 }
 
 //---------------------------------Funciones-------------------------------
-//Funcion auxiliar para generar puntero a la funcion callback
-void mqtt_callback_bridge(char* topic, byte* payload, unsigned int length) {
-    mqttwifi.callback(topic, payload, length);
+//Funcion para la recepcion serial
+void receptionSerial(void)
+{
+  if(Serial.available())
+  {
+    //Reiniciamos variable
+    index_command = 0;
+    //Recibimos el mensaje
+    bufferReception = Serial.readString();
+    //Verificamos que el mensaje enviado sea un comando
+    while(true)
+    {
+      if(bufferReception[index_command] == '@')
+      {
+        //Almacenamos el elemento nulo
+        bufferReception[index_command] = '\0';
+        //Levantamos bandera
+        flag_command = true;
+        //Rompe el bucle
+        break;
+      }
+      else if(bufferReception[index_command] == '\0'){break;}
+      //Aumentamos la variable
+      index_command++;
+    }
+  }
 }
 
 //Funcion que ejecuta el comando ingresando
@@ -107,9 +124,8 @@ void runCommand(String prtcommand)
 {
 	//Variables para almacenar los elementos que entrega el comando luego de ser divididos por la funcion sscanf
 	char cmd[64]= {0};
-  //Variables Adicionales
-  char buffermessage[100];
-
+    //Variables Adicionales
+    char buffermessage[100];
 	//Funcion que lee la cadena de caracteres y la divide en los elementos 
 	sscanf(prtcommand.c_str(), "%s ", cmd);
   
@@ -125,9 +141,6 @@ void runCommand(String prtcommand)
       //Contruir y enviar mensaje por consola
       sprintf(buffermessage, "Distance_lds_1 = %d mm, Distance_lds_2 = %d mm \n", dis_1, dis_2);
       Serial.write(buffermessage);
-      //Contruir y enviar mensaje por wifi
-      sprintf(buffermessage, "Dist,%d, %d,-,-", dis_1, dis_2);    
-      mqttwifi.mqttClient.publish("esp32/sensor/dist",buffermessage); //Topic: "esp32/sensor/imu"
     }
   }
   //---------Temperature
@@ -139,10 +152,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Temperature S1 = %.2f C° , Temperature S2 = %.2f C° \n", temp_1, temp_2);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Tem, %.2f ,%.2f ,-,-", temp_1, temp_2);    
-    mqttwifi.mqttClient.publish("esp32/sensor/temp",buffermessage); //Topic: "esp32/sensor/imu"
-
   }
   //-------luminosity
   else if (strcmp(cmd, "lig") == 0)
@@ -153,9 +162,6 @@ void runCommand(String prtcommand)
       //Contruir y enviar mensaje por consola
       sprintf(buffermessage, "Light level = %.2f lx \n", lux);
       Serial.write(buffermessage);
-      //Contruir y enviar mensaje por wifi
-      sprintf(buffermessage, "Lig, %.2f,-,-,-", lux);    
-      mqttwifi.mqttClient.publish("esp32/sensor/lig",buffermessage); 
     }
     else{Serial.println("Forced measurement failed!");}
   }
@@ -168,9 +174,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Temperature bme = %.2f C° \n", temb);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Tbme, %.2f,-,-,-", temb);    
-    mqttwifi.mqttClient.publish("esp32/sensor/bme",buffermessage); 
   }
   else if (strcmp(cmd, "patm") == 0)
   {
@@ -180,9 +183,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Pressure atmospheric = %.2f hPa \n", pre);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "PAtm, %.2f,-,-,-", pre);    
-    mqttwifi.mqttClient.publish("esp32/sensor/bme", buffermessage); 
   }
   else if (strcmp(cmd, "hum") == 0)
   {
@@ -192,15 +192,21 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Humidity realative = %.2f % \n", hum);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Hum, %.2f,-,-,-", hum);    
-    mqttwifi.mqttClient.publish("esp32/sensor/bme", buffermessage); 
   }
   //--------IMU
   else if (strcmp(cmd, "save") == 0) {
     imu.read_Data_Offset();
     saveToEEPROM(&imu);
     Serial.println("Calibration saved to EEPROM");
+  }
+  else if(strcmp(cmd, "cal") == 0)
+  {
+    //Calibration status y envio de mensaje
+    imu.read_calibration_status();
+    //Contruir mensaje y envio por consola
+    sprintf(buffermessage, "SYS_Calib_St = %u, GYR_Calib_St = %u, ACC_Calib_St = %u, MAG_Calib_St = %u \n", 
+    imu.imu_status_cal[0], imu.imu_status_cal[1], imu.imu_status_cal[2], imu.imu_status_cal[3]);
+    Serial.write(buffermessage);
   }
   else if (strcmp(cmd, "acc") == 0)
 	{
@@ -209,9 +215,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Acc_X = %.2f m/s2, Acc_Y = %.2f m/s2, Acc_Z = %.2f m/s2 \n", imu.listData[0], imu.listData[1], imu.listData[2]);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Acc,%.2f,%.2f,%.2f,-", imu.listData[0], imu.listData[1], imu.listData[2]);    
-    mqttwifi.mqttClient.publish("esp32/sensor/imu",buffermessage); //Topic: "esp32/sensor/imu"
 	}
   else if (strcmp(cmd, "mag") == 0)
 	{
@@ -220,9 +223,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Mag_X = %.2f uT, Mag_Y = %.2f uT, Mag_Z = %.2f uT \n", imu.listData[0], imu.listData[1], imu.listData[2]);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Mag,%.2f,%.2f,%.2f,-", imu.listData[0], imu.listData[1], imu.listData[2]);    
-    mqttwifi.mqttClient.publish("esp32/sensor/imu",buffermessage); //Topic: "esp32/sensor/imu"
 	}
   else if (strcmp(cmd, "gyr") == 0)
 	{
@@ -231,9 +231,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Gyr_X = %.2f Dps, Gyr_Y = %.2f Dps, Gyr_Z = %.2f Dps \n", imu.listData[0], imu.listData[1], imu.listData[2]);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Gyr,%.2f,%.2f,%.2f,-", imu.listData[0], imu.listData[1], imu.listData[2]);    
-    mqttwifi.mqttClient.publish("esp32/sensor/imu",buffermessage); //Topic: "esp32/sensor/imu"
 	}
   else if (strcmp(cmd, "eul") == 0)
 	{
@@ -242,9 +239,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Eul_Heading = %.2f degree, Eul_Roll = %.2f degree, Eul_Pitch = %.2f degree \n", imu.listData[0], imu.listData[1], imu.listData[2]);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Eul,%.2f,%.2f,%.2f,-", imu.listData[0], imu.listData[1], imu.listData[2]);    
-    mqttwifi.mqttClient.publish("esp32/sensor/imu",buffermessage); //Topic: "esp32/sensor/imu"
 	}
   else if (strcmp(cmd, "qua") == 0)
 	{
@@ -253,9 +247,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Qua_W = %.2f u, Qua_X = %.2f u, Qua_Y = %.2f u, Qua_Z = %.2f \n", imu.listData[0], imu.listData[1], imu.listData[2], imu.listData[3]);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Qua,%.2f,%.2f,%.2f,%.2f", imu.listData[0], imu.listData[1], imu.listData[2], imu.listData[3]);    
-    mqttwifi.mqttClient.publish("esp32/sensor/imu",buffermessage); //Topic: "esp32/sensor/imu"
 	}
   else if (strcmp(cmd, "lia") == 0)
 	{
@@ -264,9 +255,6 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Lia_X = %.2f m/s2, Lia_Y = %.2f m/s2, Lia_Z = %.2f m/s2 \n", imu.listData[0], imu.listData[1], imu.listData[2]);    
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Lia,%.2f,%.2f,%.2f,-", imu.listData[0], imu.listData[1], imu.listData[2]);    
-    mqttwifi.mqttClient.publish("esp32/sensor/imu",buffermessage); //Topic: "esp32/sensor/imu"
 	}
   else if (strcmp(cmd, "grv") == 0)
 	{
@@ -275,17 +263,12 @@ void runCommand(String prtcommand)
     //Contruir y enviar mensaje por consola
     sprintf(buffermessage, "Grv_X = %.2f m/s2, Grv_Y = %.2f m/s2, Grv_Z = %.2f m/s2 \n", imu.listData[0], imu.listData[1], imu.listData[2]);
     Serial.write(buffermessage);
-    //Contruir y enviar mensaje por wifi
-    sprintf(buffermessage, "Grv,%.2f,%.2f,%.2f,-", imu.listData[0], imu.listData[1], imu.listData[2]);    
-    mqttwifi.mqttClient.publish("esp32/sensor/imu",buffermessage); //Topic: "esp32/sensor/imu"
 	}
   else	
   {
     //Se imprime que el comando no fue valido
-		Serial.write("Comando no correcto \n");
-    //Envio de comando invalido
-    mqttwifi.mqttClient.publish("esp32/sensor/imu","invalid,-,-,-,-"); //Topic: "esp32/sensor/imu"
-	}
+	Serial.write("Comando no correcto \n");
+    }
 }
 
 //-----------Funciones auxiliares para guardar leer en memoria EEPROM-------------------

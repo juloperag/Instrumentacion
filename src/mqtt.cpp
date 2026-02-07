@@ -9,7 +9,7 @@ Mqtt_Wifi::Mqtt_Wifi(const char* wifi_ssid, const char* wifi_password, const cha
     port = mqtt_port;
 }
 //Método para conectar a WiFi 
-void Mqtt_Wifi::initWifi(void){
+void Mqtt_Wifi::connectWifi(void){
     Serial.print("Connecting to: ");
     Serial.println(ssid);
     //Intentar conectar al wifis

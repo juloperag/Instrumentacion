@@ -19,7 +19,7 @@ public:
     // Constructor de la clase que inicializa los valores necesarios
     Mqtt_Wifi(const char* wifi_ssid, const char* wifi_password, const char* broker, int mqtt_port);
     // Método para conectar a WiFi 
-    void initWifi(void);
+    void connectWifi(void);
     //Metodo para reconectar al MQTT
     void reconnectMQTT(void);
     //Metodo para llamar a callback

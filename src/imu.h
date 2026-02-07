@@ -6,11 +6,15 @@
 #include <Wire.h>
 #include <array>
 
-//Definicion pines y direccion
-#define BNO055_ADDR 0x29
-#define SDA_PIN 8
-#define SCL_PIN 9
-#define PIN_LED 18
+//Macro de direccion del sensor
+#define BNO055_ADDR_A 0x29
+#define BNO055_ADDR_B 0x28
+
+//Registro de calibracion
+#define CALIB_STAT 0x35
+
+//Macro de registro de chip
+#define BNO055_CHIP_ID_ADDR 0x00
 
 //Macros Power mode
 #define PWR_MODE   0x3E
@@ -59,16 +63,33 @@
 #define FACTOR_LIA 100   //LSB
 #define FACTOR_GRV 100   //LSB
 
+//Macros OFFSET
+#define ACC_OFFSET 0x55
+
 class deviceBNO055{
 public:
     //Atributos
     std::array<float, 4> listData = {0, 0, 0, 0}; //Arreglo para almacenar los datos de salida del IMU
+    int mode_operation;                           //Define el modo de operacion del imu
+    int add_I2C;                                  //Direccion I2C     
+    std::array<uint8_t, 4> imu_status_cal = {0, 0, 0, 0};                             //Arreglo para almacenar la calibracion del IMU 
+    std::array<uint8_t, 22> calData = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};  //Arreglo para almacenar la calibracion
     //Constructor
-    deviceBNO055(void);
+    deviceBNO055(int address_I2C);
+    // Metodo para leer la calibracion del sensor
+    void read_calibration_status(void);
+    // Metodo para leer el offset de 22 registros
+    void read_Data_Offset(void);
+    // Metodo de actualizacion del array calData
+    void update_Calibration(const uint8_t* newCalData, size_t len);
+    // Metodo para establecer el modo
+    void set_configuration_IMU(void);
     // Metodo para la lectura de datos por medio del imu
     void readDataOuput(uint8_t DataOuput, uint16_t factorConData, uint8_t numberAxis);
-    // Metodo para la configuracion del imu
-    void config_IMU(uint8_t add_Register, uint8_t value_config);
 };
+
+//Encabeceros de funciones
+void write_I2C(uint8_t address_I2C, uint8_t add_Register, uint8_t value);
+uint8_t read_single_I2C(uint8_t address_I2C, uint8_t add_Register);
 
 #endif
